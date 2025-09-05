@@ -137,6 +137,248 @@ coverm genome \
   --threads 12
 ```
 
+## 5. Assign taxonomy to trimmed reads
+
+Got low mapping rate, contaminants?
+
+## Check taxonomy of reads
+### This is a bit complex. 
+### So what should you do (prokaryote-only, presence/absence)? If you want maximum sensitivity for detecting which genera are present:
+Run Kraken2 on a RefSeq Bacteria+Archaea DB (or your existing RefSeq DB and filter to prokaryotes). Use a modest --confidence (0.1–0.2) and call presence with a small floor (e.g., ≥10–25 reads and ≥0.01%). If you want names that match your MAGs perfectly: Also run a GTDB Kraken2 DB pass and intersect at genus/family, or simply report RefSeq results at genus level and use GTDB-Tk names for your MAGs. A pragmatic combo (what many papers do) MAG taxonomy: GTDB-Tk (your MAG figures/tables use GTDB names). Read taxonomy: Kraken2 on RefSeq prok DB (primary presence/absence). (Optional) Cross-check: Kraken2 on GTDB DB; keep taxa confirmed by both if you want to be extra conservative for presence/absence. I could ALSO keep track of unclassified reads with Kraken2, see if they map to MAGs? 
+
+```
+#!/usr/bin/env bash
+set -euo pipefail
+shopt -s nullglob
+
+# -------- config --------
+BASE=/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ
+READS_DIR="$BASE/trimmed_reads"
+OUTDIR="$BASE/kraken"                 # all outputs live here
+DB=/data_store/kraken_database        # adjust to your DB path
+THREADS=16
+CONF=0.10                             # Kraken2 confidence
+READLEN=150                           # for Bracken k-mer model
+MINREADS=10                           # Bracken filter
+MINFRAC=0.0001                        # 0.01% fraction filter
+
+mkdir -p "$OUTDIR"/{logs,bracken/genus,bracken/phylum}
+
+# (activate env that has kraken2+bracken)
+# conda activate kraken_env
+
+cd "$READS_DIR"
+
+echo ">> Discovering samples in $(pwd)"
+mapfile -t SAMPLES < <(
+  printf '%s\n' *_paired_R1.fastq.gz \
+  | sed -E 's/_L[0-9]{3}_paired_R1\.fastq\.gz$//; s/_paired_R1\.fastq\.gz$//' \
+  | sort -u
+)
+echo "   Found ${#SAMPLES[@]} sample keys"
+
+# ------------------------
+# 1) Kraken2 per sample
+# ------------------------
+for s in "${SAMPLES[@]}"; do
+  echo "== Kraken2: $s"
+  # collect lane-chunked + singleton files
+  r1=( "${s}_L"*"_paired_R1.fastq.gz" )
+  r2=( "${s}_L"*"_paired_R2.fastq.gz" )
+  [[ -e ${s}_paired_R1.fastq.gz ]] && r1+=( "${s}_paired_R1.fastq.gz" )
+  [[ -e ${s}_paired_R2.fastq.gz ]] && r2+=( "${s}_paired_R2.fastq.gz" )
+
+  if ((${#r1[@]}==0)) || ((${#r2[@]}==0)); then
+    echo "   !! No paired inputs for $s — skipping"
+    continue
+  fi
+
+  base="$(basename "$s")"
+  REP="${OUTDIR}/${base}.kraken.report"
+  OUT="${OUTDIR}/${base}.kraken.out"
+  LOG="${OUTDIR}/logs/${base}.kraken2.log"
+
+  (
+    set -x
+    kraken2 --db "$DB" --threads "$THREADS" --paired --use-names \
+            --confidence "$CONF" \
+            --report "$REP" --output "$OUT" \
+            /dev/fd/63 /dev/fd/62 \
+            63< <(zcat -f "${r1[@]}") \
+            62< <(zcat -f "${r2[@]}")
+  ) &> "$LOG"
+
+  echo "   -> wrote: $REP  and  $OUT"
+done
+
+# ------------------------
+# 2) Bracken (genus + phylum) + per-sample filters
+# ------------------------
+echo "== Bracken (genus & phylum)"
+for rep in "${OUTDIR}"/*.kraken.report; do
+  [[ -e "$rep" ]] || { echo "   (no reports found)"; break; }
+  base=$(basename "$rep" .kraken.report)
+
+  # Genus
+  bracken -d "$DB" -i "$rep" -o "$OUTDIR/bracken/genus/${base}.bracken.G" \
+          -l G -r $READLEN -t $MINREADS \
+          -w "$OUTDIR/bracken/genus/${base}.bracken.G.report"
+
+  awk -F'\t' -v OFS='\t' -v mr=$MINREADS -v mf=$MINFRAC -v S="$base" '
+    NR==1 { for(i=1;i<=NF;i++) h[$i]=i; next }
+    ($h["new_est_reads"]+0 >= mr) && ($h["fraction_total_reads"]+0 >= mf) {
+      print S, $h["name"], $h["new_est_reads"], $h["fraction_total_reads"]
+    }' "$OUTDIR/bracken/genus/${base}.bracken.G" \
+    > "$OUTDIR/bracken/genus/${base}.genus_filtered.tsv"
+
+  # Phylum
+  bracken -d "$DB" -i "$rep" -o "$OUTDIR/bracken/phylum/${base}.bracken.P" \
+          -l P -r $READLEN -t $MINREADS \
+          -w "$OUTDIR/bracken/phylum/${base}.bracken.P.report"
+
+  awk -F'\t' -v OFS='\t' -v mr=$MINREADS -v mf=$MINFRAC -v S="$base" '
+    NR==1 { for(i=1;i<=NF;i++) h[$i]=i; next }
+    ($h["new_est_reads"]+0 >= mr) && ($h["fraction_total_reads"]+0 >= mf) {
+      print S, $h["name"], $h["new_est_reads"], $h["fraction_total_reads"]
+    }' "$OUTDIR/bracken/phylum/${base}.bracken.P" \
+    > "$OUTDIR/bracken/phylum/${base}.phylum_filtered.tsv"
+done
+
+# ------------------------
+# 3) Simple aggregations (one file per level)
+# ------------------------
+{
+  echo -e "sample\ttaxon\test_reads\tfraction"
+  cat "$OUTDIR"/bracken/genus/*.genus_filtered.tsv 2>/dev/null || true
+} > "$OUTDIR/bracken/genus_summary.tsv"
+
+{
+  echo -e "sample\ttaxon\test_reads\tfraction"
+  cat "$OUTDIR"/bracken/phylum/*.phylum_filtered.tsv 2>/dev/null || true
+} > "$OUTDIR/bracken/phylum_summary.tsv"
+
+echo "All done."
+echo "Kraken reports:         $OUTDIR/*.kraken.report"
+echo "Bracken genus summary:  $OUTDIR/bracken/genus_summary.tsv"
+echo "Bracken phylum summary: $OUTDIR/bracken/phylum_summary.tsv"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+mkdir -p /scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/kraken
+conda activate kraken_env
+
+DB=/data_store/kraken_database
+THREADS=16
+CONF=0.1
+OUTDIR=kraken
+mkdir -p "$OUTDIR"
+shopt -s nullglob
+
+# 1) discover samples from *_paired_R1.fastq.gz
+mapfile -t SAMPLES < <(printf '%s\n' *R1.fastq.gz | sed -E 's/_L[0-9]{3}_R1\.fastq\.gz$//; s/_paired_R1\.fastq\.gz$//' | sort -u)
+
+# 2) Kraken2 on each sample, streaming all lanes (no disk concatenation)
+for s in "${SAMPLES[@]}"; do
+  echo "== Kraken2: $s"
+  r1=( ${s}_L*_paired_R1.fastq.gz ); r2=( ${s}_L*_paired_R2.fastq.gz )
+  [[ -e ${s}_paired_R1.fastq.gz ]] && r1+=( ${s}_paired_R1.fastq.gz )
+  [[ -e ${s}_paired_R2.fastq.gz ]] && r2+=( ${s}_paired_R2.fastq.gz )
+
+  if ((${#r1[@]}==0)) || ((${#r2[@]}==0)); then
+    echo "   !! No paired inputs for $s — skipping"
+    continue
+  fi
+
+  # outputs
+  base=$(basename "$s")
+  REP="${OUTDIR}/${base}.kraken.report"
+  OUT="${OUTDIR}/${base}.kraken.out"
+
+  # run kraken2 (paired), with names suitable for Krona conversion later
+  kraken2 --db "$DB" --threads "$THREADS" --paired --use-names --confidence "$CONF" \
+    --report "$REP" --output "$OUT" \
+    /dev/fd/63 /dev/fd/62 \
+    63< <(zcat -f "${r1[@]}") \
+    62< <(zcat -f "${r2[@]}")
+
+  echo "   -> wrote: $REP  and  $OUT"
+done
+
+# 3) Bracken on each sample
+
+conda create -n bracken_env -y python=3.10 bracken kraken2
+conda activate bracken_env
+
+#genus
+DB=/data_store/kraken_database
+OUT=kraken_clean
+BR=$OUT/bracken_genus
+mkdir -p "$BR"
+READLEN=150
+MINREADS=10
+MINFRAC=0.0001
+
+for rep in "$OUT"/*.kraken.report; do
+  base=$(basename "$rep" .kraken.report)
+
+  # Bracken (genus)
+  bracken -d "$DB" -i "$rep" -o "$BR/${base}.bracken.G" \
+          -l G -r $READLEN -t $MINREADS \
+          -w "$BR/${base}.bracken.G.report"
+
+  # Filter to ≥x% AND ≥x est. reads (TAB-safe; uses header names)
+  awk -F'\t' -v OFS='\t' -v mr=$MINREADS -v mf=$MINFRAC -v S="$base" '
+    NR==1 { for(i=1;i<=NF;i++) h[$i]=i; next }
+    ($h["new_est_reads"]+0 >= mr) && ($h["fraction_total_reads"]+0 >= mf) {
+      # print: sample  taxon  est_reads  fraction
+      print S, $h["name"], $h["new_est_reads"], $h["fraction_total_reads"]
+    }' "$BR/${base}.bracken.G" > "$BR/${base}.genus_filtered.tsv"
+done
+
+# phylum
+DB=/data_store/kraken_database
+OUT=kraken_pfpplus
+BR=$OUT/bracken_phylum
+mkdir -p "$BR"
+
+READLEN=150      # use 151 only if you built a 151 k-mer distrib
+MINREADS=10
+MINFRAC=0.0001   # 0.01%
+
+for rep in "$OUT"/*.kraken.report; do
+  base=$(basename "$rep" .kraken.report)
+
+  # Bracken (phylum)
+  bracken -d "$DB" -i "$rep" -o "$BR/${base}.bracken.P" \
+          -l P -r $READLEN -t $MINREADS \
+          -w "$BR/${base}.bracken.P.report"
+
+  # Filter to ≥x% AND ≥x est. reads (TAB-safe; uses header names)
+  awk -F'\t' -v OFS='\t' -v mr=$MINREADS -v mf=$MINFRAC -v S="$base" '
+    NR==1 { for(i=1;i<=NF;i++) h[$i]=i; next }
+    ($h["new_est_reads"]+0 >= mr) && ($h["fraction_total_reads"]+0 >= mf) {
+      # sample  taxon  est_reads  fraction
+      print S, $h["name"], $h["new_est_reads"], $h["fraction_total_reads"]
+    }' "$BR/${base}.bracken.P" > "$BR/${base}.phylum_filtered.tsv"
+done
+```
+
+
 ---
 
 ## Notes & Recommendations
