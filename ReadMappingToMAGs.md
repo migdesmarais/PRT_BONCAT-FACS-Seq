@@ -41,50 +41,64 @@ bowtie2-build all_MAGs_unique.fa all_MAGs_index
 Use Bowtie2 and Samtools to map paired-end reads and sort/filter mapped reads.
 
 ```bash
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
-# --- paths ---
-BASE=/scratch/mdesmarais/OB_BONCAT-FACS-SEQ
-READS_DIR=$BASE/reads
-OUT=$BASE/magmap_out
+BASE=/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ
+READS_DIR="$BASE/trimmed_reads"
+OUT="$BASE/magmap_out"
 THREADS=12
-INDEX_DIR=/scratch/mdesmarais/OB_BONCAT-FACS-SEQ/dereplicated_genomes/renamed_mags
-IDX=$INDEX_DIR/all_MAGs_index                # bowtie2 index prefix (no .bt2)
-FASTAS=$INDEX_DIR/all_MAGs_unique.fa         # concatenated MAGs FASTA
-REF=$FASTAS                                 # use this in calmd
+
+# Correct locations (as in your screenshots)
+INDEX_DIR="$BASE/PRT_MAGs/all_MAGs"
+IDX="$INDEX_DIR/all_MAGs_index"            # bowtie2 prefix (no extension)
+REF="$INDEX_DIR/all_MAGs_unique.fa"        # concatenated MAGs FASTA
 
 mkdir -p "$OUT"/{logs,bam,counts}
 
-# ensure reference FASTA index exists
-[ -s "$REF" ] || { echo "REF FASTA not found: $REF"; exit 1; }
-[ -s "${REF}.fai" ] || samtools faidx "$REF"
+# sanity checks
+ls -lh "${IDX}."*.bt2*   >/dev/null
+[ -f "$REF" ] || { echo "REF not found: $REF"; exit 1; }
+[ -f "${REF}.fai" ] || samtools faidx "$REF"
 
-# --- map all samples ---
+# map ONE sample first (quick test)
+R1=$(ls "$READS_DIR"/*_paired_R1.fastq.gz | head -n1)
+R2="${R1/_paired_R1/_paired_R2}"
+[ -f "$R1" ] && [ -f "$R2" ] || { echo "Missing mates in $READS_DIR"; exit 1; }
+SAMPLE="$(basename "$R1" | sed 's/_paired_R1\.fastq\.gz$//')"
+
+echo ">>> Test mapping $SAMPLE"
+bowtie2 --very-sensitive -p "$THREADS" --no-unal --no-mixed --no-discordant -k 1 \
+  -x "$IDX" -1 "$R1" -2 "$R2" 2> "$OUT/logs/${SAMPLE}_bowtie2.log" \
+| samtools view -h -b -q 30 -F 4 -F 256 -F 2048 \
+| samtools sort -@ "$THREADS" -o "$OUT/bam/${SAMPLE}.q30.primary.bam"
+
+samtools index "$OUT/bam/${SAMPLE}.q30.primary.bam"
+samtools calmd -bAr "$OUT/bam/${SAMPLE}.q30.primary.bam" "$REF" > "$OUT/bam/${SAMPLE}.tmp.bam"
+mv -f "$OUT/bam/${SAMPLE}.tmp.bam" "$OUT/bam/${SAMPLE}.q30.primary.bam"
+samtools index "$OUT/bam/${SAMPLE}.q30.primary.bam"
+samtools idxstats "$OUT/bam/${SAMPLE}.q30.primary.bam" > "$OUT/counts/${SAMPLE}_idxstats.tsv"
+
+# if that worked, do the loop
 for R1 in "$READS_DIR"/*_paired_R1.fastq.gz; do
-  [ -e "$R1" ] || { echo "No R1 files found in $READS_DIR"; exit 1; }
-  R2=${R1/_paired_R1/_paired_R2}
-  [[ -e "$R2" ]] || { echo "Missing mate for $R1"; exit 1; }
+  [ -e "$R1" ] || { echo "No R1 files in $READS_DIR"; break; }
+  R2="${R1/_paired_R1/_paired_R2}"
+  [ -f "$R2" ] || { echo "Missing mate for $R1"; exit 1; }
+  SAMPLE="$(basename "$R1" | sed 's/_paired_R1\.fastq\.gz$//')"
+  echo ">>> Mapping $SAMPLE"
 
-  SAMPLE=$(basename "$R1" | sed -E 's/_paired_R1\.fastq\.gz$//" | grep -oE 'OBNC|OB[0-9]+|[A-Za-z0-9._-]+')
-  echo "== Mapping $SAMPLE"
-
-  bowtie2 --very-sensitive -p "$THREADS" \
-    --no-unal --no-mixed --no-discordant -k 1 \
-    -x "$IDX" -1 "$R1" -2 "$R2" \
-    2> "$OUT/logs/${SAMPLE}_bowtie2.log" \
-  | samtools view -b -q 30 -F 4 -F 256 -F 2048 \
+  bowtie2 --very-sensitive -p "$THREADS" --no-unal --no-mixed --no-discordant -k 1 \
+    -x "$IDX" -1 "$R1" -2 "$R2" 2> "$OUT/logs/${SAMPLE}_bowtie2.log" \
+  | samtools view -h -b -q 30 -F 4 -F 256 -F 2048 \
   | samtools sort -@ "$THREADS" -o "$OUT/bam/${SAMPLE}.q30.primary.bam"
 
   samtools index "$OUT/bam/${SAMPLE}.q30.primary.bam"
-
-  # add MD/NM tags so CoverM can enforce %ID
   samtools calmd -bAr "$OUT/bam/${SAMPLE}.q30.primary.bam" "$REF" > "$OUT/bam/${SAMPLE}.tmp.bam"
   mv -f "$OUT/bam/${SAMPLE}.tmp.bam" "$OUT/bam/${SAMPLE}.q30.primary.bam"
   samtools index "$OUT/bam/${SAMPLE}.q30.primary.bam"
-
   samtools idxstats "$OUT/bam/${SAMPLE}.q30.primary.bam" > "$OUT/counts/${SAMPLE}_idxstats.tsv"
 done
+
 ```
 
 ---
