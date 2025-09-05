@@ -41,6 +41,8 @@ bowtie2-build all_MAGs_unique.fa all_MAGs_index
 Use Bowtie2 and Samtools to map paired-end reads and sort/filter mapped reads.
 
 ```bash
+conda activate bowtie2_env2
+
 #!/bin/bash
 set -euo pipefail
 
