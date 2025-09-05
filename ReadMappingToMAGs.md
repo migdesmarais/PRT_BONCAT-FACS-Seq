@@ -9,18 +9,18 @@ This workflow describes how to map quality-controlled sequencing reads from BONC
 **Ensure each MAG FASTA has unique headers for downstream mapping and quantification.**
 
 ```bash
-mkdir -p renamed_mags
+mkdir -p renamed_derep_mags
 
-for MAG in *.fa; do
+for MAG in /scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/PRT_MAGs/derep_mags/final_derep/*.fa; do
   ID=$(basename "$MAG" .fa)
-  awk -v prefix="$ID" '/^>/{print ">" prefix "_" substr($0,2)} !/^>/' "$MAG" > renamed_mags/"$ID.renamed.fa"
+  awk -v prefix="$ID" '/^>/{print ">" prefix "_" substr($0,2)} !/^>/' "$MAG" > renamed_derep_mags/"$ID.fa"
 done
 ```
 
 **Concatenate all renamed MAGs into a single reference fasta:**
 
 ```bash
-cat renamed_mags/*.renamed.fa > all_MAGs_unique.fa
+cat renamed_dered_mags/*.fa > all_MAGs_unique.fa
 ```
 
 ---
