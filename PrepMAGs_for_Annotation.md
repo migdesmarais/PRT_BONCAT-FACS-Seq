@@ -9,13 +9,10 @@ This workflow outlines essential steps for preparing Metagenome-Assembled Genome
 Set up environment and run Prodigal for all MAGs:
 
 ```bash
-conda create --name prodigal
 conda activate prodigal
-conda install -c bioconda -c conda-forge prodigal seqkit
-mkdir prodigal
 
-for MAG in *.fasta; do
-  BASENAME=$(basename "$MAG" .fasta)
+for MAG in *.fa; do
+  BASENAME=$(basename "$MAG" .fa)
   prodigal -i "$MAG" \
     -a "prodigal/${BASENAME}_proteins.faa" \
     -d "prodigal/${BASENAME}_nucleotides.fna" \
@@ -26,6 +23,12 @@ for MAG in *.fasta; do
   seqkit stats "prodigal/${BASENAME}_proteins.faa"
 done
 ```
+
+
+
+
+
+
 
 ---
 
