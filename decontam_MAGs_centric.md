@@ -202,23 +202,23 @@ done
 log "All mapping finished. BAMs in: $MAPDIR"
 log "Tail the live log with: tail -f $MASTER"
 
-
-
-
-
-
-
 # 2) contig depths for binners
 conda activate binning_tools_env
 jgi_summarize_bam_contig_depths --outputDepth $RUN/map/depth.txt $RUN/map/*.bam
 
 # 3) binners
-metabat2 -i "$ASM" -a $RUN/map/depth.txt -o $RUN/bins/metabat2/bin -m 2000 -t 24
-run_MaxBin.pl -contig "$ASM" -abund $RUN/map/depth.txt -out $RUN/bins/maxbin2/bin -thread 24 -min_contig_length 2000
+metabat2 -i "$ASM" -a $RUN/map/depth.txt -o $RUN/bins/metabat2/bin -m 1500 -t 24
+
+run_MaxBin.pl -contig "$ASM" -abund $RUN/map/depth.txt -out $RUN/bins/maxbin2/bin -thread 24 -min_contig_length 1500
 
 cut_up_fasta.py "$ASM" -c 10000 -o 0 -m -b $RUN/concoct/contigs_10K.bed > $RUN/concoct/contigs_10K.fa
 concoct_coverage_table.py $RUN/concoct/contigs_10K.bed $RUN/map/*.bam > $RUN/concoct/coverage_table.tsv
 concoct --composition_file $RUN/concoct/contigs_10K.fa --coverage_file $RUN/concoct/coverage_table.tsv -b $RUN/concoct/
+
+
+
+
+
 merge_cutup_clustering.py $RUN/concoct/clustering_gt1000.csv > $RUN/concoct/clustering_merged.csv
 mkdir -p $RUN/bins/concoct
 extract_fasta_bins.py "$ASM" $RUN/concoct/clustering_merged.csv --output_path $RUN/bins/concoct
