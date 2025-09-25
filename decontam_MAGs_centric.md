@@ -1,13 +1,4 @@
 # Conda install
-conda create -n mags -c conda-forge -c bioconda \
-  spades=3.15.5 megahit=1.2.9 \
-  bwa-mem2=2.2.1 samtools=1.20 bbmap=39.01 \
-  metabat2=2.17 maxbin2=2.2.7 concoct=1.1.0 \
-  dastool=1.1.6 checkm-genome=1.2.2 \
-  gtdbtk=2.4.0 prodigal=2.6.3 hmmer=3.3.2 \
-  fastani=1.33 parallel=20240722 seqkit=2.8.2
-conda activate mags
-
 # Concatenate reads (Samples and NC, separately)
 ```
 # where your reads live
@@ -54,25 +45,36 @@ quast.py -t 16 -m 1000 -o $QC/quast_NC  $ASM/NC/final.contigs.fa
 
 grep -E 'contigs \(>= 1000 bp\)|Total length|Largest contig|N50|L50|GC %' \
   $QC/quast_NC/report.txt
-<img width="252" height="154" alt="Capture d’écran, le 2025-09-23 à 15 57 09" src="https://github.com/user-attachments/assets/0118dfda-5642-4abd-8eb2-cc7631bfa892" />
 
-# (when ready) ALL
-quast.py -t 16 -m 1000 -o $QC/quast_ALL $ASM/ALL/final.contigs.fa
+# contigs (>= 1000 bp)      70           
+Total length (>= 0 bp)      490538       
+Total length (>= 1000 bp)   490538       
+Total length (>= 5000 bp)   411806       
+Total length (>= 10000 bp)  321225       
+Total length (>= 25000 bp)  77085        
+Total length (>= 50000 bp)  0            
+Largest contig              49808        
+Total length                490538       
+N50                         12586        
+L50                         13
+
+# ALL
+quast.py -t 16 -m 1000 -o $QC/quast_ALL  $ASM/ALL/final.contigs.fa
 
 grep -E 'contigs \(>= 1000 bp\)|Total length|Largest contig|N50|L50|GC %' \
   $QC/quast_ALL/report.txt
 
-
-
-
-
-
-# Diagnostic
-# 1) How many reads in the NC trimmed files?
-seqkit stats -T -a $READS/NC_*_paired_R1.fastq.gz $READS/NC_*_paired_R2.fastq.gz \
-  > $OUT/nc_trimmed_seqstats.tsv
-column -t -s $'\t' $OUT/nc_trimmed_seqstats.tsv | sed -n '1,5p'
-
+# contigs (>= 1000 bp)      35566        
+Total length (>= 0 bp)      195460572    
+Total length (>= 1000 bp)   195460572    
+Total length (>= 5000 bp)   140668365    
+Total length (>= 10000 bp)  99697914     
+Total length (>= 25000 bp)  42884908     
+Total length (>= 50000 bp)  16095322     
+Largest contig              996967       
+Total length                195460572    
+N50                         10334        
+L50                         4533 
 
 ```
 
@@ -125,6 +127,118 @@ DEP=$BASE/mag_results/NC/map/depth.txt
 awk 'NR>1 {n++; d+=$3} END{print "mean_totalAvgDepth =", (n? d/n : 0)}' "$DEP"
 
 # THE ASSEMBLY IS VERY POOR, SO WHAT WE WILL DO NEXT IS JUST CLASSIFY READS WITH KRAKEN2 ONCE THE DB IS DOWNLOADED (GTDB-TK) AND THEN USE THE NC TAXONOMY TO REMOVE MAGS THAT MATCH IN THE SAMPLES "ALL".
+```
+
+# Map + bin samples + NC
+# ALL
+```
+BASE=/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ
+READS=$BASE/trimmed_reads
+ASM=$BASE/assemblies/ALL/final.contigs.fa
+RUN=$BASE/mag_results/ALL
+mkdir -p $RUN/{map,bins/metabat2,bins/maxbin2,concoct,checkm,gtdbtk}
+
+
+# 1) map each non-NC library separately
+conda activate samtools_env
+
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ---- config ----
+BASE=/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ
+READS=$BASE/trimmed_reads
+ASM=$BASE/assemblies/ALL/final.contigs.fa
+RUN=$BASE/mag_results/ALL
+MAPDIR=$RUN/map
+LOGDIR=$RUN/logs
+MASTER=$LOGDIR/mapping_master.log
+mkdir -p "$MAPDIR" "$LOGDIR"
+
+log(){ echo "[$(date '+%F %T')] $*" | tee -a "$MASTER" ; }
+
+# Build list of ALL (non-NC) R1 files with full paths (robust)
+find "$READS" -maxdepth 1 -name "*_paired_R1.fastq.gz" -printf "%f\n" \
+  | grep -v '^NC_' \
+  | while read -r f; do echo "$READS/$f"; done > "$RUN/ALL_R1.list"
+
+N=$(wc -l < "$RUN/ALL_R1.list")
+log "Found $N libraries for ALL"
+
+# Index once
+log "Indexing assembly: $ASM"
+bwa index "$ASM" 2> >(tee -a "$MASTER" >&2)
+
+# Map each library with live stderr and per-sample logs
+i=0
+paste "$RUN/ALL_R1.list" <(sed 's/_R1/_R2/' "$RUN/ALL_R1.list") | while read -r R1 R2; do
+  i=$((i+1))
+  S=$(basename "$R1" | sed 's/_L003.*//')
+  BAM="$MAPDIR/${S}.bam"
+  BWA_LOG="$LOGDIR/${S}.bwa.log"
+  SORT_LOG="$LOGDIR/${S}.sort.log"
+  FLAGSTAT="$LOGDIR/${S}.flagstat.txt"
+
+  if [[ -s "$BAM" ]]; then
+    log "($i/$N) [SKIP] $S (BAM exists)"
+    continue
+  fi
+
+  log "($i/$N) Mapping $S"
+  # bwa mem + samtools sort; stream stderr to both console and log files
+  bwa mem -t 16 "$ASM" "$R1" "$R2" \
+    2> >(tee -a "$BWA_LOG" >> "$MASTER" >&2) \
+  | samtools sort -@8 -o "$BAM" - \
+    2> >(tee -a "$SORT_LOG" >> "$MASTER" >&2)
+
+  samtools index "$BAM"
+  samtools flagstat "$BAM" > "$FLAGSTAT"
+
+  # One-line summary to console+master
+  MAPLINE=$(awk '/ mapped \(/ && $0 !~ /primary/{print; exit}' "$FLAGSTAT")
+  log "($i/$N) Done $S :: $MAPLINE"
+done
+
+log "All mapping finished. BAMs in: $MAPDIR"
+log "Tail the live log with: tail -f $MASTER"
+
+
+
+
+
+
+
+# 2) contig depths for binners
+conda activate binning_tools_env
+jgi_summarize_bam_contig_depths --outputDepth $RUN/map/depth.txt $RUN/map/*.bam
+
+# 3) binners
+metabat2 -i "$ASM" -a $RUN/map/depth.txt -o $RUN/bins/metabat2/bin -m 2000 -t 24
+run_MaxBin.pl -contig "$ASM" -abund $RUN/map/depth.txt -out $RUN/bins/maxbin2/bin -thread 24 -min_contig_length 2000
+
+cut_up_fasta.py "$ASM" -c 10000 -o 0 -m -b $RUN/concoct/contigs_10K.bed > $RUN/concoct/contigs_10K.fa
+concoct_coverage_table.py $RUN/concoct/contigs_10K.bed $RUN/map/*.bam > $RUN/concoct/coverage_table.tsv
+concoct --composition_file $RUN/concoct/contigs_10K.fa --coverage_file $RUN/concoct/coverage_table.tsv -b $RUN/concoct/
+merge_cutup_clustering.py $RUN/concoct/clustering_gt1000.csv > $RUN/concoct/clustering_merged.csv
+mkdir -p $RUN/bins/concoct
+extract_fasta_bins.py "$ASM" $RUN/concoct/clustering_merged.csv --output_path $RUN/bins/concoct
+
+# 4) refine with DAS_Tool
+Fasta_to_Scaffolds2Bin.sh -i $RUN/bins/metabat2 -b $RUN/metabat2.tsv
+Fasta_to_Scaffolds2Bin.sh -i $RUN/bins/maxbin2  -b $RUN/maxbin2.tsv
+Fasta_to_Scaffolds2Bin.sh -i $RUN/bins/concoct  -b $RUN/concoct.tsv
+DAS_Tool -i $RUN/metabat2.tsv,$RUN/maxbin2.tsv,$RUN/concoct.tsv -l metabat2,maxbin2,concoct \
+         -c "$ASM" -o $RUN/dastool -t 24
+
+# 5) CheckM
+checkm lineage_wf -x fa $RUN/dastool_DASTool_bins $RUN/checkm -t 24
+checkm qa -o 2 -f $RUN/checkm/qa.tsv $RUN/checkm/lineage.ms $RUN/checkm
+
+# 6) GTDB-Tk (taxonomy for bins)
+# (install once if needed: conda install -y -c conda-forge -c bioconda gtdbtk pplacer fastani)
+export GTDBTK_DATA_PATH=/scratch/mdesmarais/databases/gtdbtk   # set your DB path
+gtdbtk classify_wf --genome_dir $RUN/dastool_DASTool_bins -x fa --out_dir $RUN/gtdbtk --cpus 24
+
 
 
 
