@@ -6,6 +6,15 @@ echo "$DB"    # sanity check
 URL=https://data.gtdb.ecogenomic.org/releases/latest/genomic_files_reps/gtdb_genomes_reps.tar.gz
 wget -c -O "$DB/gtdb_genomes_reps.tar.gz" "$URL" --progress=dot:giga
 
+rm -f MD5SUM.txt
+curl -fsS -o MD5SUM.txt \
+  https://data.gtdb.ecogenomic.org/releases/latest/genomic_files_reps/MD5SUM.txt
+
+# 2) Verify your local tarball against the official MD5
+grep ' gtdb_genomes_reps.tar.gz$' MD5SUM.txt \
+| awk '{print $1"  gtdb_genomes_reps.tar.gz"}' \
+| md5sum -c -
+
 DB=/scratch/mdesmarais/kraken_gtdb_r226_128g
 k2 build --db "$DB" --special gtdb \
   --gtdb-server data.gtdb.ecogenomic.org \
@@ -13,4 +22,3 @@ k2 build --db "$DB" --special gtdb \
   --max-db-size 128GiB \
   --threads 24 \
   --log "$DB/build.log"
-
