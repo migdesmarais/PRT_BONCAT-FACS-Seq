@@ -229,12 +229,14 @@ Create an index for rapid mapping.
 conda activate bowtie2_env2
 bowtie2-build all_MAGs_unique.fa all_MAGs_index
 ```
-
-
-
-
-
 ---
+
+
+
+
+
+
+
 
 ## 3. Map Cleaned Reads to MAGs
 
@@ -248,11 +250,11 @@ set -euo pipefail
 
 BASE=/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ
 READS_DIR="$BASE/trimmed_reads"
-OUT="$BASE/magmap_out"
+OUT="$BASE/magmap_out_all"
 THREADS=12
 
 # Correct locations (as in your screenshots)
-INDEX_DIR="$BASE/PRT_MAGs/all_MAGs"
+INDEX_DIR="/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/PRT_MAGs/mags_all_completeness_contam/renamed_all_mags"
 IDX="$INDEX_DIR/all_MAGs_index"            # bowtie2 prefix (no extension)
 REF="$INDEX_DIR/all_MAGs_unique.fa"        # concatenated MAGs FASTA
 
