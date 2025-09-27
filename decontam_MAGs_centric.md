@@ -214,30 +214,155 @@ run_MaxBin.pl -contig "$ASM" -abund $RUN/map/depth.txt -out $RUN/bins/maxbin2/bi
 cut_up_fasta.py "$ASM" -c 10000 -o 0 -m -b $RUN/concoct/contigs_10K.bed > $RUN/concoct/contigs_10K.fa
 concoct_coverage_table.py $RUN/concoct/contigs_10K.bed $RUN/map/*.bam > $RUN/concoct/coverage_table.tsv
 concoct --composition_file $RUN/concoct/contigs_10K.fa --coverage_file $RUN/concoct/coverage_table.tsv -b $RUN/concoct/
-
-
-
-
-
 merge_cutup_clustering.py $RUN/concoct/clustering_gt1000.csv > $RUN/concoct/clustering_merged.csv
 mkdir -p $RUN/bins/concoct
 extract_fasta_bins.py "$ASM" $RUN/concoct/clustering_merged.csv --output_path $RUN/bins/concoct
 
 # 4) refine with DAS_Tool
-Fasta_to_Scaffolds2Bin.sh -i $RUN/bins/metabat2 -b $RUN/metabat2.tsv
-Fasta_to_Scaffolds2Bin.sh -i $RUN/bins/maxbin2  -b $RUN/maxbin2.tsv
-Fasta_to_Scaffolds2Bin.sh -i $RUN/bins/concoct  -b $RUN/concoct.tsv
-DAS_Tool -i $RUN/metabat2.tsv,$RUN/maxbin2.tsv,$RUN/concoct.tsv -l metabat2,maxbin2,concoct \
-         -c "$ASM" -o $RUN/dastool -t 24
+
+# on your system:
+source ~/miniforge3/bin/activate dastool   # or: conda activate dastool
+which Rscript                              # should point to .../envs/dastool/bin/Rscript
+DAS_Tool -h
+# 0) use the env you just made
+conda activate dastool
+
+# use the env that has DAS_Tool
+conda activate dastool
+
+# paths
+BASE=/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ
+RUN=$BASE/mag_results/ALL
+ASM=$BASE/assemblies/ALL/final.contigs.fa
+mkdir -p "$RUN/das_tool"
+
+# make the contig↔bin map (MetaBAT2; change extension if needed)
+BIN_DIR=$RUN/bins/metabat2
+S2B=$RUN/das_tool/metabat2.s2b.tsv
+: > "$S2B"
+for f in "$BIN_DIR"/*.fa "$BIN_DIR"/*.fasta "$BIN_DIR"/*.fna; do
+  [ -e "$f" ] || continue
+  bin=$(basename "$f"); bin=${bin%.*}
+  awk -v b="$bin" '/^>/{h=$1; sub(/^>/,"",h); print h "\t" b}' "$f" >> "$S2B"
+done
+wc -l "$S2B"; head -3 "$S2B"
+
+# run DAS_Tool (explicit output prefix!)
+OUTBASE=$RUN/das_tool/ALL_DASTool
+DAS_Tool \
+  -i "$S2B" -l metabat2 \
+  -c "$ASM" \
+  -o "$OUTBASE" \
+  -t 24 --search_engine diamond --write_bins
+
+# check outputs
+ls -l ${OUTBASE}_DASTool_bins | head
+
+
+
+
+
+
+
+
+
+conda activate dastool
+
+BASE=/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ
+RUN=$BASE/mag_results/ALL
+ASM=$BASE/assemblies/ALL/final.contigs.fa
+S2B=$RUN/das_tool/metabat2.s2b.tsv     # the TSV you already built
+OUTBASE=$RUN/das_tool/ALL_DASTool_lowt
+
+DAS_Tool \
+  -i "$S2B" -l metabat2 \
+  -c "$ASM" \
+  -o "$OUTBASE" \
+  -t 24 --search_engine diamond \
+  --score_threshold 0 \
+  --duplicate_penalty 0.0 \
+  --write_bins --write_unbinned
+
+# bins should now be here:
+ls -l ${OUTBASE}_DASTool_bins | head
+
+# 5) CheckM on dastool and metabat2 bins
+conda activate checkm_env   # or whatever env you installed checkm-genome in
+THREADS=24
+
+BASE=/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ
+RUN=$BASE/mag_results/ALL
+
+# (A) DAS_Tool output you showed in the screenshot
+DASTOOL_BINS=$RUN/das_tool/ALL_DASTool_lowt_DASTool_bins
+
+# (B) original MetaBAT2 bins
+MB2_BINS=$RUN/bins/metabat2
+
+run_checkm () {
+  local BIN_DIR="$1" LABEL="$2"
+  mkdir -p "$RUN/checkm_${LABEL}/genomes"
+
+  # detect extension: fa > fasta > fna
+  local EXT=fa
+  ls "$BIN_DIR"/*.fa >/dev/null 2>&1 || EXT=fasta
+  ls "$BIN_DIR"/*.${EXT} >/dev/null 2>&1 || EXT=fna
+
+  # symlink genomes except 'unbinned.*'
+  find "$BIN_DIR" -maxdepth 1 -type f -name "*.${EXT}" ! -name "unbinned.*" -exec ln -sf {} "$RUN/checkm_${LABEL}/genomes/" \;
+
+  echo "[*] Running CheckM on ${LABEL} (${EXT})"
+  checkm lineage_wf -x "${EXT}" "$RUN/checkm_${LABEL}/genomes" "$RUN/checkm_${LABEL}" -t "$THREADS"
+  checkm qa -o 2 -f "$RUN/checkm_${LABEL}/qa.tsv" "$RUN/checkm_${LABEL}/lineage.ms" "$RUN/checkm_${LABEL}"
+  echo "[done] $RUN/checkm_${LABEL}/qa.tsv"
+}
+
+# (A) DAS_Tool bins
+run_checkm "$DASTOOL_BINS" "dastool_lowt"
+
+# (B) MetaBAT2 bins
+run_checkm "$MB2_BINS" "metabat2"
+
+awk 'BEGIN{FS=OFS="\t"} NR==1{h=$0; next} {print $0,"\tdastool_lowt"}' \
+  "$RUN/checkm_dastool_lowt/qa.tsv" > "$RUN/checkm_all.tsv"
+
+awk 'BEGIN{FS=OFS="\t"} FNR==1{next} {print $0,"\tmetabat2"}' \
+  "$RUN/checkm_metabat2/qa.tsv" >> "$RUN/checkm_all.tsv"
+
+echo -e "$(head -1 $RUN/checkm_dastool_lowt/qa.tsv)\tsource" | cat - "$RUN/checkm_all.tsv" > "$RUN/checkm_all.tmp" && mv "$RUN/checkm_all.tmp" "$RUN/checkm_all.tsv"
+echo "[combined] $RUN/checkm_all.tsv"
+
+
+
+
+
+
+
 
 # 5) CheckM
+conda activate checkm_env
+
 checkm lineage_wf -x fa $RUN/dastool_DASTool_bins $RUN/checkm -t 24
 checkm qa -o 2 -f $RUN/checkm/qa.tsv $RUN/checkm/lineage.ms $RUN/checkm
 
 # 6) GTDB-Tk (taxonomy for bins)
-# (install once if needed: conda install -y -c conda-forge -c bioconda gtdbtk pplacer fastani)
-export GTDBTK_DATA_PATH=/scratch/mdesmarais/databases/gtdbtk   # set your DB path
-gtdbtk classify_wf --genome_dir $RUN/dastool_DASTool_bins -x fa --out_dir $RUN/gtdbtk --cpus 24
+conda activate gtdbtk_env
+export GTDBTK_DATA_PATH=/data_store/gtdbtk_files   # your DB
+
+BASE=/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ
+RUN=$BASE/mag_results/ALL
+MB2_BINS=$RUN/bins/metabat2
+EXT=fa                          # change if your bins are .fasta or .fna
+OUT=$RUN/gtdbtk_metabat2
+mkdir -p "$OUT"
+
+gtdbtk classify_wf \
+  --genome_dir "$MB2_BINS" \
+  -x "$EXT" \
+  --out_dir "$OUT" \
+  --cpus 24 \
+  --skip_ani_screen
+
 
 
 
