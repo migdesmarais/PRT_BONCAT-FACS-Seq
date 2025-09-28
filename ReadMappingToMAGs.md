@@ -231,13 +231,6 @@ bowtie2-build all_MAGs_unique.fa all_MAGs_index
 ```
 ---
 
-
-
-
-
-
-
-
 ## 3. Map Cleaned Reads to MAGs
 
 Use Bowtie2 and Samtools to map paired-end reads and sort/filter mapped reads.
@@ -285,6 +278,20 @@ for R1 in "$READS_DIR"/*_paired_R1.fastq.gz; do
   samtools idxstats "$OUT/bam/${SAMPLE}.q30.primary.bam" > "$OUT/counts/${SAMPLE}_idxstats.tsv"
 done
 ```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 Summary of mapping rate (per sample).
 
