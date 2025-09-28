@@ -22,3 +22,207 @@ k2 build --db "$DB" --special gtdb \
   --max-db-size 128GiB \
   --threads 24 \
   --log "$DB/build.log"
+
+
+
+
+
+
+
+
+
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ===== USER SETTINGS =====
+DB=/scratch/mdesmarais/kraken_gtdb_r226_128g
+READS=/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/trimmed_reads
+OUT=/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/kraken_gtdbtk
+THREADS=24
+CONF=0.05          # Kraken2 confidence (0 for raw)
+READLEN=150        # PE read length for Bracken
+EXCLUDE_NC=false   # true to skip files with "NC_" in name
+PRELOAD=true       # set false if RAM is tight
+# =========================
+
+export LC_ALL=C.UTF-8 LANG=C.UTF-8
+mkdir -p "$OUT/kraken" "$OUT/bracken" "$OUT/logs"
+
+# ---- enumerate paired R1 files once ----
+if $EXCLUDE_NC; then
+  mapfile -t R1S < <(find "$READS" -maxdepth 1 -type f -name '*_paired_R1.fastq.gz' | grep -v '/NC_')
+else
+  mapfile -t R1S < <(find "$READS" -maxdepth 1 -type f -name '*_paired_R1.fastq.gz')
+fi
+echo "[*] Found ${#R1S[@]} paired R1 files."
+
+sample_id () {
+  basename "$1" | sed -E 's/_L[0-9]+_paired_R1\.fastq\.gz$//'
+}
+
+# ---- ensure Bracken DB exists (once) ----
+KMER=$(kraken2-inspect --db "$DB" 2>/dev/null | awk -F: '/k-mer length/{gsub(/ /,"");print $2}')
+KMER=${KMER:-35}
+if [[ ! -f "$DB/database${READLEN}mers.kmer_distrib" ]]; then
+  echo "[*] Building Bracken DB (k=$KMER, readlen=$READLEN)..."
+  bracken-build -d "$DB" -t "$THREADS" -k "$KMER" -l "$READLEN"
+fi
+
+############################################
+# LOOP 1 — KRAKEN2 FOR ALL SAMPLES
+############################################
+echo "[*] LOOP 1: Kraken2"
+for R1 in "${R1S[@]}"; do
+  R2="${R1/_R1/_R2}"; [[ -f "$R2" ]] || { echo "[skip] Missing R2 for $R1"; continue; }
+  S=$(sample_id "$R1")
+  KREP="$OUT/kraken/${S}.kreport"
+  KOUT="$OUT/kraken/${S}.kraken"
+  KLOG="$OUT/logs/${S}.kraken2.stderr"
+
+  if [[ -s "$KREP" ]]; then
+    echo "[done] Kraken2 exists for $S"
+    continue
+  fi
+
+  echo "[run] Kraken2 $S"
+  kraken2 --db "$DB" --threads "$THREADS" $($PRELOAD && echo --preload) \
+          --paired --gzip-compressed --confidence "$CONF" \
+          --report "$KREP" --output "$KOUT" \
+          "$R1" "$R2" 2> "$KLOG"
+done
+
+############################################
+# LOOP 2-3 — BRACKEN (GENUS/PHYLUM) FOR ALL
+############################################
+# --- config ---
+DB=/scratch/mdesmarais/kraken_gtdb_r226_128g
+OUT=/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/kraken_gtdbtk
+THREADS=24
+READLEN=150
+export LC_ALL=C.UTF-8 LANG=C.UTF-8
+mkdir -p "$OUT/bracken" "$OUT/logs"
+
+# Build Bracken DB for this read length if missing
+KMER=$(kraken2-inspect --db "$DB" 2>/dev/null | awk -F: '/k-mer length/{gsub(/ /,"");print $2}')
+KMER=${KMER:-35}
+[[ -f "$DB/database${READLEN}mers.kmer_distrib" ]] || \
+  bracken-build -d "$DB" -t "$THREADS" -k "$KMER" -l "$READLEN"
+
+# ===== LOOP A: Bracken GENUS for all kreports =====
+for KREP in "$OUT"/kraken/*.kreport; do
+  S=$(basename "$KREP" .kreport)
+  OUTTXT="$OUT/bracken/${S}.bracken_genus.txt"
+  [[ -s "$OUTTXT" ]] && { echo "[skip] genus $S"; continue; }
+  echo "[run] genus $S"
+  bracken -d "$DB" -i "$KREP" -o "$OUTTXT" \
+          -w "${OUTTXT%.txt}.report" -r "$READLEN" -l G -t 10 \
+          2> "$OUT/logs/${S}.bracken_genus.stderr"
+done
+
+# ===== LOOP B: Bracken PHYLUM for all kreports =====
+for KREP in "$OUT"/kraken/*.kreport; do
+  S=$(basename "$KREP" .kreport)
+  OUTTXT="$OUT/bracken/${S}.bracken_phylum.txt"
+  [[ -s "$OUTTXT" ]] && { echo "[skip] phylum $S"; continue; }
+  echo "[run] phylum $S"
+  bracken -d "$DB" -i "$KREP" -o "$OUTTXT" \
+          -w "${OUTTXT%.txt}.report" -r "$READLEN" -l P -t 10 \
+          2> "$OUT/logs/${S}.bracken_phylum.stderr"
+done
+
+# ===== LOOP C: Per-sample tidy TSVs + combined TSVs =====
+printf "sample\ttaxon\test_reads\tfraction\n" > "$OUT/bracken/all_genus_summary.tsv"
+printf "sample\ttaxon\test_reads\tfraction\n" > "$OUT/bracken/all_phylum_summary.tsv"
+
+for KREP in "$OUT"/kraken/*.kreport; do
+  S=$(basename "$KREP" .kreport)
+
+  BG="$OUT/bracken/${S}.bracken_genus.txt"
+  if [[ -s "$BG" ]]; then
+    GS="$OUT/bracken/${S}.genus_summary.tsv"
+    printf "sample\ttaxon\test_reads\tfraction\n" > "$GS"
+    awk -v S="$S" 'NR>1{print S "\t" $1 "\t" $6 "\t" $7}' "$BG" >> "$GS"
+    tail -n +2 "$GS" >> "$OUT/bracken/all_genus_summary.tsv"
+  fi
+
+  BP="$OUT/bracken/${S}.bracken_phylum.txt"
+  if [[ -s "$BP" ]]; then
+    PS="$OUT/bracken/${S}.phylum_summary.tsv"
+    printf "sample\ttaxon\test_reads\tfraction\n" > "$PS"
+    awk -v S="$S" 'NR>1{print S "\t" $1 "\t" $6 "\t" $7}' "$BP" >> "$PS"
+    tail -n +2 "$PS" >> "$OUT/bracken/all_phylum_summary.tsv"
+  fi
+done
+
+echo "[✔] Done → $OUT/bracken/"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+############################################
+# LOOP 3 — BRACKEN (PHYLUM) FOR ALL
+############################################
+echo "[*] LOOP 3: Bracken (phylum)"
+for R1 in "${R1S[@]}"; do
+  S=$(sample_id "$R1")
+  KREP="$OUT/kraken/${S}.kreport"
+  BP="$OUT/bracken/${S}.bracken_phylum.txt"
+
+  [[ -s "$KREP" ]] || { echo "[skip] No kreport for $S yet"; continue; }
+  if [[ -s "$BP" ]]; then
+    echo "[done] Bracken phylum exists for $S"
+    continue
+  fi
+
+  echo "[run] Bracken phylum $S"
+  bracken -d "$DB" -i "$KREP" -o "$BP" -w "${BP%.txt}.report" \
+          -r "$READLEN" -l P -t 10 \
+          2> "$OUT/logs/${S}.bracken_phylum.stderr"
+done
+
+############################################
+# LOOP 4 — MAKE TIDY TSVs (+ COMBINE)
+############################################
+echo "[*] LOOP 4: Summaries"
+ALLG="$OUT/bracken/all_genus_summary.tsv"
+ALLP="$OUT/bracken/all_phylum_summary.tsv"
+echo -e "sample\ttaxon\test_reads\tfraction" > "$ALLG"
+echo -e "sample\ttaxon\test_reads\tfraction" > "$ALLP"
+
+for R1 in "${R1S[@]}"; do
+  S=$(sample_id "$R1")
+  BG="$OUT/bracken/${S}.bracken_genus.txt"
+  BP="$OUT/bracken/${S}.bracken_phylum.txt"
+  GS="$OUT/bracken/${S}.genus_summary.tsv"
+  PS="$OUT/bracken/${S}.phylum_summary.tsv"
+
+  if [[ -s "$BG" && ! -s "$GS" ]]; then
+    printf "sample\ttaxon\test_reads\tfraction\n" > "$GS"
+    awk -v S="$S" 'NR>1{print S"\t"$1"\t"$6"\t"$7}' "$BG" >> "$GS"
+  fi
+  if [[ -s "$BP" && ! -s "$PS" ]]; then
+    printf "sample\ttaxon\test_reads\tfraction\n" > "$PS"
+    awk -v S="$S" 'NR>1{print S"\t"$1"\t"$6"\t"$7}' "$BP" >> "$PS"
+  fi
+  [[ -s "$GS" ]] && tail -n +2 "$GS" >> "$ALLG"
+  [[ -s "$PS" ]] && tail -n +2 "$PS" >> "$ALLP"
+done
+
+echo "[✔] Done:"
+echo "  Kraken reports : $OUT/kraken/*.kreport"
+echo "  Bracken outputs: $OUT/bracken/*bracken_*.{txt,report}"
+echo "  Per-sample TSV : $OUT/bracken/*.genus_summary.tsv, *.phylum_summary.tsv"
+echo "  Combined TSVs  : $ALLG , $ALLP"
+
+
