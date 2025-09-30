@@ -220,52 +220,6 @@ extract_fasta_bins.py "$ASM" $RUN/concoct/clustering_merged.csv --output_path $R
 
 # 4) refine with DAS_Tool
 
-# on your system:
-source ~/miniforge3/bin/activate dastool   # or: conda activate dastool
-which Rscript                              # should point to .../envs/dastool/bin/Rscript
-DAS_Tool -h
-# 0) use the env you just made
-conda activate dastool
-
-# use the env that has DAS_Tool
-conda activate dastool
-
-# paths
-BASE=/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ
-RUN=$BASE/mag_results/ALL
-ASM=$BASE/assemblies/ALL/final.contigs.fa
-mkdir -p "$RUN/das_tool"
-
-# make the contig↔bin map (MetaBAT2; change extension if needed)
-BIN_DIR=$RUN/bins/metabat2
-S2B=$RUN/das_tool/metabat2.s2b.tsv
-: > "$S2B"
-for f in "$BIN_DIR"/*.fa "$BIN_DIR"/*.fasta "$BIN_DIR"/*.fna; do
-  [ -e "$f" ] || continue
-  bin=$(basename "$f"); bin=${bin%.*}
-  awk -v b="$bin" '/^>/{h=$1; sub(/^>/,"",h); print h "\t" b}' "$f" >> "$S2B"
-done
-wc -l "$S2B"; head -3 "$S2B"
-
-# run DAS_Tool (explicit output prefix!)
-OUTBASE=$RUN/das_tool/ALL_DASTool
-DAS_Tool \
-  -i "$S2B" -l metabat2 \
-  -c "$ASM" \
-  -o "$OUTBASE" \
-  -t 24 --search_engine diamond --write_bins
-
-# check outputs
-ls -l ${OUTBASE}_DASTool_bins | head
-
-
-
-
-
-
-
-
-
 conda activate dastool
 
 BASE=/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ
@@ -332,22 +286,21 @@ awk 'BEGIN{FS=OFS="\t"} FNR==1{next} {print $0,"\tmetabat2"}' \
 echo -e "$(head -1 $RUN/checkm_dastool_lowt/qa.tsv)\tsource" | cat - "$RUN/checkm_all.tsv" > "$RUN/checkm_all.tmp" && mv "$RUN/checkm_all.tmp" "$RUN/checkm_all.tsv"
 echo "[combined] $RUN/checkm_all.tsv"
 
-
-
-
-
-
-
-
 # 5) CheckM
 conda activate checkm_env
 
 checkm lineage_wf -x fa $RUN/dastool_DASTool_bins $RUN/checkm -t 24
 checkm qa -o 2 -f $RUN/checkm/qa.tsv $RUN/checkm/lineage.ms $RUN/checkm
 
+
+
+
+
+
+
 # 6) GTDB-Tk (taxonomy for bins)
 conda activate gtdbtk_env
-export GTDBTK_DATA_PATH=/data_store/gtdbtk_files   # your DB
+export GTDBTK_DATA_PATH=/data_store/gtdbtk_db/release226   # your DB
 
 BASE=/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ
 RUN=$BASE/mag_results/ALL
@@ -358,10 +311,57 @@ mkdir -p "$OUT"
 
 gtdbtk classify_wf \
   --genome_dir "$MB2_BINS" \
-  -x "$EXT" \
+  --extension "$EXT" \
   --out_dir "$OUT" \
   --cpus 24 \
   --skip_ani_screen
+
+
+
+
+
+
+BASE=/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ
+RUN=$BASE/mag_results/ALL
+MB2_BINS=/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/mag_results/ALL/das_tool/ALL_DASTool_lowt_DASTool_bins
+EXT=fa                          # change if your bins are .fasta or .fna
+OUT=$RUN/gtdbtk_mdastool
+mkdir -p "$OUT"
+
+gtdbtk classify_wf \
+  --genome_dir "$MB2_BINS" \
+  --extension "$EXT" \
+  --out_dir "$OUT" \
+  --cpus 24 \
+  --skip_ani_screen
+
+
+
+
+
+
+
+
+
+
+
+# activate env if needed
+conda activate gtdbtk_env
+
+# point to your GTDB data release (adjust if different)
+export GTDBTK_DATA_PATH=~/gtdbtk_db/release226
+
+# create a scratch/tmp directory
+mkdir -p /scratch/mdesmarais/tmp_gtdbtk
+
+# run classify_wf (GTDB-Tk will CREATE the mash file at the path you give)
+gtdbtk classify_wf \
+  --genome_dir /scratch/mdesmarais/OB_BONCAT-FACS-SEQ/dereplicated_genomes/renamed_mags \
+  --out_dir   /scratch/mdesmarais/OB_BONCAT-FACS-SEQ/dereplicated_genomes/gtdbtk \
+  --extension fna \
+  --cpus 16 --pplacer_cpus 16 \
+  --tmpdir /scratch/mdesmarais/tmp_gtdbtk \
+  --mash_db /scratch/mdesmarais/gtdbtk_mash.msh
 
 
 
