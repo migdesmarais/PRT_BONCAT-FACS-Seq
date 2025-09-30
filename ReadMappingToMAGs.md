@@ -194,11 +194,17 @@ coverm genome \
 
 
 # ALL MAGS
-# Workflow: Mapping Trimmed BONCAT-FACS-Seq Reads to High-Quality in situ MAGs
+# Workflow: Mapping Trimmed BONCAT-FACS-Seq Reads to non-filtered in situ MAGs
 
 This workflow describes how to map quality-controlled sequencing reads from BONCAT-FACS-Seq sorted cells to high-quality in situ metagenome-assembled genomes (MAGs), to determine which MAGs are transcriptionally and translationally active.
 
 ---
+
+## CheckM on them and assign taxonomy with graftM, make table
+```
+conda activate checkm_env
+checkm lineage_wf -x fa /scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/PRT_MAGs/mags_all_completeness_contam/renamed_all_mags /scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/PRT_MAGs/mags_all_completeness_contam/renamed_all_mags/checkm -t 20
+```
 
 ## 1. Prepare MAG Reference Sequences
 
