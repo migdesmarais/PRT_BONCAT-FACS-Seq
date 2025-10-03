@@ -23,6 +23,22 @@ k2 build --db "$DB" --special gtdb \
   --threads 24 \
   --log "$DB/build.log"
 
+# paths
+DB="/scratch/mdesmarais/kraken_gtdb_r226_128g"
+SHIM="${DB}_bracken_shim"
+RL=150
+
+# 1) watch the temp output grow (exists only while running)
+watch -n 3 'ls -lh '"$SHIM"'/database.kraken.tmp 2>/dev/null'
+
+# 2) watch CPU/mem of the kraken2 child process
+pgrep -a -f "kraken2 --db $SHIM"
+ps -o pid,pcpu,pmem,etime,cmd -p $(pgrep -d, -f "kraken2 --db $SHIM")
+
+# 3) tail the bracken log
+LOG=$(ls -1t "$DB"/logs/bracken-build_shim_r${RL}_*.log | head -n1)
+tail -f "$LOG"
+
 
 
 
