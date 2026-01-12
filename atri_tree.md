@@ -161,6 +161,7 @@ cd /scratch/mdesmarais/Atribacterota_tree
 conda activate phylo_env
 
 ls -1 "$PWD"/genomes_filtered_sediment/*.fna > phylo_sed_only/genomes_filtered_sediment.list
+ls -1 "$PWD"/genomes_clean/*.fna > genomes_filtered_sediment.list
 wc -l phylo/genomes_filtered_sediment.no_allgap.list
 
 grep -v -E "Amon_Mud_Volcano_CSMAG-886_1250mbsl_N_Acmbsf_GCA_030666935\.1|Laptev_Sea_Cold_Seep_CSMAG-808_N_Ambsl_14-18cmbsf_GCA_030668465\.1|Scotian_Basin_Oil_Gas_Seep_CSMAG-2406_2306mbsl_60cmbsf_GCA_030612975\.1" \
@@ -179,6 +180,16 @@ GToTree \
   -t 24
 ```
 
+
+GToTree \
+  -f genomes_filtered_sediment.list \
+  -H Bacteria \
+  -B \
+  -o gtotree_out_besthit \
+  -t 24
+  
+
+
 # 4) Infer the final maximum-likelihood tree with IQ-TREE
 #    -m MFP  : ModelFinder picks best-fit amino acid model
 #    -B 1000 : ultrafast bootstrap support
@@ -194,4 +205,13 @@ iqtree \
   -T 24 \
   --prefix phylo_sed_only/atrib_iqtree
 ```
+
+
+
+iqtree \
+  -s Aligned_SCGs.faa \
+  -m MFP \
+  -B 1000 \
+  -T 24 \
+  --prefix KB1_iqtree
 
