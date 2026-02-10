@@ -39,7 +39,23 @@ scp -r mdesmarais@fram.ucsd.edu:/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/raw_data
 ### 2. Read Trimming
 
 Trim adapters and low-quality bases using your preferred tool. Example with Trimmomatic:
+First make samples.txt from reads directory.
 
+```
+# 1) list unique sample prefixes (strip _R1_001.fastq.gz / _R2_001.fastq.gz)
+ls *_R1_001.fastq.gz 2>/dev/null \
+  | sed 's/_R1_001\.fastq\.gz$//' \
+  | sort -u > samples.txt
+
+# 2) quick sanity check
+wc -l samples.txt
+head samples.txt
+
+# 3) copy to correct directory
+cp /data_store/seq_data/250813_DTSA1131_1132_1133_NovaX25B/samples.txt /scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/trimmed_reads
+```
+
+From data_store directory where reads are located, screen:
 ```
 conda activate trimmomatic_env
 
