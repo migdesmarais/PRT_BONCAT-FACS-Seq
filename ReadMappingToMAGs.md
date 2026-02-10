@@ -21,7 +21,7 @@ done
 **Concatenate all renamed MAGs into a single reference fasta:**
 
 ```bash
-cat renamed_dered_mags/*.fa > all_MAGs_unique.fa
+cat renamed_derep_mags/*.fa > all_MAGs_unique.fa
 ```
 
 ---
