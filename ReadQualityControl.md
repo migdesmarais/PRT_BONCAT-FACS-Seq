@@ -12,6 +12,7 @@ Quality control of sequencing reads is a critical step to ensure reliable downst
 - **Trimmomatic/Cutadapt/fastp**: For trimming adapters and low-quality bases.
 - **MultiQC**: For aggregating QC reports across samples.
 
+
 ## Workflow
 
 ### 1. FastQC Analysis
