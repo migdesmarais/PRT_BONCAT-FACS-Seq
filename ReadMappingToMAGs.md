@@ -41,6 +41,8 @@ bowtie2-build all_MAGs_unique.fa all_MAGs_index
 
 Use Bowtie2 and Samtools to map paired-end reads and sort/filter mapped reads.
 
+----------------> NEEDS TO BE CHANGE TO Q20
+
 ```bash
 conda activate bowtie2_env2
 
@@ -140,46 +142,6 @@ coverm genome \
   --min-read-aligned-percent 75 \
   --output-file /scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/magmap_out/mag_coverage_summary_strict.tsv \
   --threads 12
-```
-
-Relaxed settings 85 50
-```bash
-coverm genome \
-  --bam-files /scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/magmap_out/bam/*.bam \
-  --genome-fasta-directory /scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/PRT_MAGs/derep_mags/renamed_derep_mags \
-  --genome-fasta-extension fa \
-  --min-read-percent-identity 85 \
-  --min-read-aligned-percent 50 \
-  --methods covered_bases rpkm relative_abundance \
-  --threads 12 \
-  --output-file /scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/magmap_out/mag_coverage_summary_85-50.tsv
-```
-
-Relaxed settings
-```bash
-coverm genome \
-  --bam-files /scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/magmap_out/bam/*.bam \
-  --genome-fasta-directory /scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/PRT_MAGs/renamed_derep_mags \
-  --genome-fasta-extension fa \
-  --min-read-percent-identity 80 \
-  --min-read-aligned-percent 50 \
-  --methods covered_bases rpkm relative_abundance \
-  --threads 12 \
-  --output-file /scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/magmap_out/mag_coverage_summary_80-50.tsv
-```
-
-Very relaxed settings
-
-```bash
-coverm genome \
-  --bam-files /scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/magmap_out/bam/*.bam \
-  --genome-fasta-directory /scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/PRT_MAGs/renamed_derep_mags \
-  --genome-fasta-extension fa \
-  --min-read-percent-identity 0 \
-  --min-read-aligned-percent 0 \
-  --methods covered_bases rpkm relative_abundance \
-  --threads 12 \
-  --output-file /scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/magmap_out/mag_coverage_summary_vrelaxed.tsv
 ```
 
 
