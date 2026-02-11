@@ -48,33 +48,35 @@ set -euo pipefail
 
 # ===== USER SETTINGS =====
 DB=/scratch/mdesmarais/kraken_gtdb_r226_128g
-READS=/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/trimmed_reads
-OUT=/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/kraken_gtdbtk
+READS=/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/trimmed_reads_FINAL
+OUT=/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/kraken_FINAL
 THREADS=24
 CONF=0.05          # Kraken2 confidence (0 for raw)
 READLEN=150        # PE read length for Bracken
 EXCLUDE_NC=false   # true to skip files with "NC_" in name
 PRELOAD=true       # set false if RAM is tight
 # =========================
-
-export LC_ALL=C.UTF-8 LANG=C.UTF-8
-mkdir -p "$OUT/kraken" "$OUT/bracken" "$OUT/logs"
-
-# ---- enumerate paired R1 files once ----
-if $EXCLUDE_NC; then
-  mapfile -t R1S < <(find "$READS" -maxdepth 1 -type f -name '*_paired_R1.fastq.gz' | grep -v '/NC_')
-else
-  mapfile -t R1S < <(find "$READS" -maxdepth 1 -type f -name '*_paired_R1.fastq.gz')
-fi
-echo "[*] Found ${#R1S[@]} paired R1 files."
-
+# ---------- helpers ----------
 sample_id () {
-  basename "$1" | sed -E 's/_L[0-9]+_paired_R1\.fastq\.gz$//'
+  basename "$1" | sed 's/_paired_R1\.fastq\.gz$//'
 }
 
-# ---- ensure Bracken DB exists (once) ----
+# Safe preload flag
+PRELOAD_FLAG=""
+[[ "${PRELOAD:-false}" == "true" ]] && PRELOAD_FLAG="--preload"
+
+# ---------- enumerate paired R1 files once (INCLUDES NC) ----------
+shopt -s nullglob
+R1S=( "$READS"/*_paired_R1.fastq.gz )
+shopt -u nullglob
+
+echo "[info] Found ${#R1S[@]} paired R1 files in $READS"
+[[ ${#R1S[@]} -gt 0 ]] || { echo "[error] No *_paired_R1.fastq.gz files found in $READS"; exit 1; }
+
+# ---------- ensure Bracken DB exists (once) ----------
 KMER=$(kraken2-inspect --db "$DB" 2>/dev/null | awk -F: '/k-mer length/{gsub(/ /,"");print $2}')
 KMER=${KMER:-35}
+
 if [[ ! -f "$DB/database${READLEN}mers.kmer_distrib" ]]; then
   echo "[*] Building Bracken DB (k=$KMER, readlen=$READLEN)..."
   bracken-build -d "$DB" -t "$THREADS" -k "$KMER" -l "$READLEN"
@@ -84,9 +86,14 @@ fi
 # LOOP 1 — KRAKEN2 FOR ALL SAMPLES
 ############################################
 echo "[*] LOOP 1: Kraken2"
+
 for R1 in "${R1S[@]}"; do
-  R2="${R1/_R1/_R2}"; [[ -f "$R2" ]] || { echo "[skip] Missing R2 for $R1"; continue; }
+  R2="${R1/_paired_R1/_paired_R2}"
+  [[ -f "$R2" ]] || { echo "[skip] Missing R2 for $R1 -> expected $R2"; continue; }
+
   S=$(sample_id "$R1")
+  [[ -n "$S" ]] || { echo "[skip] Could not parse sample ID from $R1"; continue; }
+
   KREP="$OUT/kraken/${S}.kreport"
   KOUT="$OUT/kraken/${S}.kraken"
   KLOG="$OUT/logs/${S}.kraken2.stderr"
@@ -97,7 +104,7 @@ for R1 in "${R1S[@]}"; do
   fi
 
   echo "[run] Kraken2 $S"
-  kraken2 --db "$DB" --threads "$THREADS" $($PRELOAD && echo --preload) \
+  kraken2 --db "$DB" --threads "$THREADS" $PRELOAD_FLAG \
           --paired --gzip-compressed --confidence "$CONF" \
           --report "$KREP" --output "$KOUT" \
           "$R1" "$R2" 2> "$KLOG"
