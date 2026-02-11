@@ -121,7 +121,7 @@ CoverM requires NM (edit distance) and MD (mismatch string) tags in BAMs.
 ```bash
 # Test one BAM
 OUT=/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/magmap_out
-samtools view -h $OUT/bam/260ATALL_S4_L003.q30.primary.bam | grep -m1 -E "NM:i|MD:Z" || echo "No tags found"
+samtools view -h $OUT/bam/540AT2ALL.q30.primary.bam | grep -m1 -E "NM:i|MD:Z" || echo "No tags found"
 ```
 ---
 
@@ -146,7 +146,7 @@ Relaxed settings 85 50
 ```bash
 coverm genome \
   --bam-files /scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/magmap_out/bam/*.bam \
-  --genome-fasta-directory /scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/PRT_MAGs/renamed_derep_mags \
+  --genome-fasta-directory /scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/PRT_MAGs/derep_mags/renamed_derep_mags \
   --genome-fasta-extension fa \
   --min-read-percent-identity 85 \
   --min-read-aligned-percent 50 \
@@ -181,6 +181,19 @@ coverm genome \
   --threads 12 \
   --output-file /scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/magmap_out/mag_coverage_summary_vrelaxed.tsv
 ```
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -440,15 +453,6 @@ coverm genome \
   --output-file /scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/magmap_out_all/q20/mag_coverage_summary_q20_90_75.tsv \
   --threads 12
 ```
-
-
-
-
-
-
-
-
-
 
 Relaxed settings 85 50
 ```bash
