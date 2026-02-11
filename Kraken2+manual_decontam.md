@@ -1,4 +1,6 @@
 # REMOVE CONTAMINANTS FROM BRACKEN RESULTS
+
+#### BUILD 128GB GTDB DATABASE FOR KRAKEN2
 ```
 screen
 export DB=/scratch/mdesmarais/kraken_gtdb_r226_128g
@@ -39,13 +41,7 @@ ps -o pid,pcpu,pmem,etime,cmd -p $(pgrep -d, -f "kraken2 --db $SHIM")
 LOG=$(ls -1t "$DB"/logs/bracken-build_shim_r${RL}_*.log | head -n1)
 tail -f "$LOG"
 
-
-
-
-
-
-
-
+######## KRAKEN2 #########
 
 #!/usr/bin/env bash
 set -euo pipefail
