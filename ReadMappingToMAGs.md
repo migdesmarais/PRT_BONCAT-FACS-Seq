@@ -37,7 +37,7 @@ bowtie2-build all_MAGs_unique.fa all_MAGs_index
 
 ---
 
-## 3. Map Cleaned Reads to MAGs
+## 3. Map Cleaned AND Combined (2 sequencing runs) Reads to MAGs
 
 Use Bowtie2 and Samtools to map paired-end reads and sort/filter mapped reads.
 
@@ -48,12 +48,12 @@ conda activate bowtie2_env2
 set -euo pipefail
 
 BASE=/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ
-READS_DIR="$BASE/trimmed_reads"
+READS_DIR="$BASE/trimmed_reads_FINAL"
 OUT="$BASE/magmap_out"
 THREADS=12
 
 # Correct locations (as in your screenshots)
-INDEX_DIR="$BASE/PRT_MAGs/all_MAGs"
+INDEX_DIR="$BASE/PRT_MAGs/derep_mags"
 IDX="$INDEX_DIR/all_MAGs_index"            # bowtie2 prefix (no extension)
 REF="$INDEX_DIR/all_MAGs_unique.fa"        # concatenated MAGs FASTA
 
@@ -112,7 +112,6 @@ done
 
 # pretty view
 column -t -s$'\t' "$DEST" | less -S
-
 ```
 
 ## 4. Verify MD/NM Tags for CoverM
