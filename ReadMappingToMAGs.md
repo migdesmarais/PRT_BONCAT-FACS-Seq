@@ -135,16 +135,42 @@ Strict setting 95 75
 ```bash
 coverm genome \
   --bam-files /scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/magmap_out/bam/*.bam \
-  --genome-fasta-directory /scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/PRT_MAGs/renamed_derep_mags \
+  --genome-fasta-directory /scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/MAGs/derep_mags/renamed_derep_mags \
   --genome-fasta-extension fa \
-  --methods covered_bases rpkm relative_abundance \
+  --methods covered_bases covered_fraction mean rpkm relative_abundance \
   --min-read-percent-identity 95 \
   --min-read-aligned-percent 75 \
   --output-file /scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/magmap_out/mag_coverage_summary_strict.tsv \
   --threads 12
 ```
 
+## 6 RUN CHECKM on MAGs
 
+```
+#!/usr/bin/env bash
+set -euo pipefail
+
+conda activate checkm_env
+
+BASE=/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ
+MAGS_DIR="$BASE/MAGs/derep_mags/renamed_derep_mags"     # <-- EDIT if needed
+OUTDIR="$BASE/PRT_MAGs/checkm_derep"
+THREADS=24
+EXT=fa                                          # <-- fa or fna, etc.
+
+mkdir -p "$OUTDIR"
+
+# Run CheckM
+checkm lineage_wf -x "$EXT" -t "$THREADS" --pplacer_threads "$THREADS" \
+  "$MAGS_DIR" "$OUTDIR" 2>&1 | tee "$OUTDIR/checkm_lineage_wf.log"
+
+# Produce an easy-to-read QC table (optional but useful)
+checkm qa -o 2 -f "$OUTDIR/checkm_QA.tsv" \
+  "$OUTDIR/lineage.ms" "$OUTDIR" 2>&1 | tee "$OUTDIR/checkm_qa.log"
+
+echo "[done] CheckM output: $OUTDIR"
+echo "[done] QA table: $OUTDIR/checkm_QA.tsv"
+```
 
 
 
