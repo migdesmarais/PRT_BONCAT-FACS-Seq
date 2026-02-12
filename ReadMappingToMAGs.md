@@ -66,7 +66,7 @@ ls -lh "${IDX}."*.bt2*   >/dev/null
 [ -f "$REF" ] || { echo "REF not found: $REF"; exit 1; }
 [ -f "${REF}.fai" ] || samtools faidx "$REF"
 
-# if that worked, do the loop
+# if that worked, do the loop Q30
 for R1 in "$READS_DIR"/*_paired_R1.fastq.gz; do
   [ -e "$R1" ] || { echo "No R1 files in $READS_DIR"; break; }
   R2="${R1/_paired_R1/_paired_R2}"
@@ -85,12 +85,74 @@ for R1 in "$READS_DIR"/*_paired_R1.fastq.gz; do
   samtools index "$OUT/bam/${SAMPLE}.q30.primary.bam"
   samtools idxstats "$OUT/bam/${SAMPLE}.q30.primary.bam" > "$OUT/counts/${SAMPLE}_idxstats.tsv"
 done
+
+# if that worked, do the loop Q20
+BASE=/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ
+READS_DIR="$BASE/trimmed_reads_FINAL"
+OUT="$BASE/magmap_out_q20"
+THREADS=12
+
+# Correct locations (as in your screenshots)
+INDEX_DIR="$BASE/MAGs/derep_mags"
+IDX="$INDEX_DIR/all_MAGs_index"            # bowtie2 prefix (no extension)
+REF="$INDEX_DIR/all_MAGs_unique.fa"        # concatenated MAGs FASTA
+
+mkdir -p "$OUT"/{logs,bam,counts}
+
+for R1 in "$READS_DIR"/*_paired_R1.fastq.gz; do
+  [ -e "$R1" ] || { echo "No R1 files in $READS_DIR"; break; }
+  R2="${R1/_paired_R1/_paired_R2}"
+  [ -f "$R2" ] || { echo "Missing mate for $R1"; exit 1; }
+
+  SAMPLE="$(basename "$R1" | sed 's/_paired_R1\.fastq\.gz$//')"
+  echo ">>> Mapping $SAMPLE"
+
+  bowtie2 --very-sensitive -p "$THREADS" --no-unal --no-mixed --no-discordant -k 1 \
+    -x "$IDX" -1 "$R1" -2 "$R2" 2> "$OUT/logs/${SAMPLE}_bowtie2.q20.log" \
+  | samtools view -h -b -q 20 -F 4 -F 256 -F 2048 \
+  | samtools sort -@ "$THREADS" -o "$OUT/bam/${SAMPLE}.q20.primary.bam"
+
+  samtools index "$OUT/bam/${SAMPLE}.q20.primary.bam"
+
+  samtools calmd -bAr "$OUT/bam/${SAMPLE}.q20.primary.bam" "$REF" > "$OUT/bam/${SAMPLE}.tmp.bam"
+  mv -f "$OUT/bam/${SAMPLE}.tmp.bam" "$OUT/bam/${SAMPLE}.q20.primary.bam"
+
+  samtools index "$OUT/bam/${SAMPLE}.q20.primary.bam"
+  samtools idxstats "$OUT/bam/${SAMPLE}.q20.primary.bam" > "$OUT/counts/${SAMPLE}_idxstats.q20.tsv"
+done
 ```
 
 Summary of mapping rate (per sample).
 
 ```bash
 OUT=/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/magmap_out
+DEST="$OUT/mapping_from_bowtie2.tsv"
+
+echo -e "sample\ttotal_reads\tmapped_reads\toverall_alignment_rate" > "$DEST"
+
+for f in "$OUT"/logs/*_bowtie2.log; do
+  sample=$(basename "$f" _bowtie2.log)
+
+  # total reads
+  total=$(awk '/ reads; of these:/{print $1; exit}' "$f")
+
+  # mapped reads (concordant pairs only, matches --no-mixed --no-discordant)
+  exact1=$(awk '/aligned concordantly exactly 1 time/{print $1; exit}' "$f")
+  gt1=$(awk '/aligned concordantly >1 times/{print $1; exit}' "$f")
+  mapped=$(( (${exact1:-0}) + (${gt1:-0}) ))
+
+  # overall alignment rate string (e.g. "0.35% overall alignment rate")
+  rate=$(awk '/overall alignment rate/{print $1; exit}' "$f")   # keeps the %
+
+  printf "%s\t%s\t%s\t%s\n" "$sample" "${total:-0}" "${mapped:-0}" "${rate:-0%}" >> "$DEST"
+done
+
+# pretty view
+column -t -s$'\t' "$DEST" | less -S
+```
+
+```bash
+OUT=/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/magmap_out_q20
 DEST="$OUT/mapping_from_bowtie2.tsv"
 
 echo -e "sample\ttotal_reads\tmapped_reads\toverall_alignment_rate" > "$DEST"
@@ -154,7 +216,7 @@ conda activate checkm_env
 
 BASE=/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ
 MAGS_DIR="$BASE/MAGs/derep_mags/renamed_derep_mags"     # <-- EDIT if needed
-OUTDIR="$BASE/PRT_MAGs/checkm_derep"
+OUTDIR="$BASE/MAGs/checkm_derep"
 THREADS=24
 EXT=fa                                          # <-- fa or fna, etc.
 
