@@ -89,11 +89,11 @@ done
 # if that worked, do the loop Q20
 BASE=/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ
 READS_DIR="$BASE/trimmed_reads_FINAL"
-OUT="$BASE/magmap_out_q20"
+OUT="$BASE/magmap_out_all_q20"
 THREADS=12
 
 # Correct locations (as in your screenshots)
-INDEX_DIR="$BASE/MAGs/derep_mags"
+INDEX_DIR="$BASE/MAGs/ALL_MAGs"
 IDX="$INDEX_DIR/all_MAGs_index"            # bowtie2 prefix (no extension)
 REF="$INDEX_DIR/all_MAGs_unique.fa"        # concatenated MAGs FASTA
 
