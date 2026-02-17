@@ -160,9 +160,7 @@ done
 cd /scratch/mdesmarais/Atribacterota_tree
 conda activate phylo_env
 
-ls -1 "$PWD"/genomes_filtered_sediment/*.fna > phylo_sed_only/genomes_filtered_sediment.list
-ls -1 "$PWD"/genomes_clean/*.fna > genomes_filtered_sediment.list
-wc -l phylo/genomes_filtered_sediment.no_allgap.list
+ls -1 "$PWD"/Sediments_all/*.fna > Sediments_all/sediments_all.list
 
 grep -v -E "Amon_Mud_Volcano_CSMAG-886_1250mbsl_N_Acmbsf_GCA_030666935\.1|Laptev_Sea_Cold_Seep_CSMAG-808_N_Ambsl_14-18cmbsf_GCA_030668465\.1|Scotian_Basin_Oil_Gas_Seep_CSMAG-2406_2306mbsl_60cmbsf_GCA_030612975\.1" \
   phylo_sed_only/genomes_filtered_sediment.list > phylo_sed_only/genomes_filtered_sediment.no_allgap.list
@@ -173,10 +171,10 @@ wc -l phylo_sed_only/genomes_filtered_sediment.no_allgap.list
 rm -rf phylo/gtotree_out_besthit_no_allgap_sediment
 
 GToTree \
-  -f phylo_sed_only/genomes_filtered_sediment.list \
+  -f Sediments_all/sediments_all.list \
   -H Bacteria \
   -B \
-  -o phylo_sed_only/gtotree_out_besthit_no_allgap_sed \
+  -o Sediments_all/gtotree_out_besthit_sediments_all \
   -t 24
 ```
 
@@ -188,7 +186,11 @@ GToTree \
   -o gtotree_out_besthit \
   -t 24
   
-
+GToTree \
+  -f Sediments_all/sediments_all.list \
+  -H Bacteria \
+  -o Sediments_all/gtotree_out_sediments_all_noBestHit \
+  -t 24
 
 # 4) Infer the final maximum-likelihood tree with IQ-TREE
 #    -m MFP  : ModelFinder picks best-fit amino acid model
@@ -199,11 +201,11 @@ GToTree \
 cd /scratch/mdesmarais/Atribacterota_tree
 
 iqtree \
-  -s phylo_sed_only/gtotree_out_besthit_no_allgap_sed/Aligned_SCGs.faa \
+  -s Sediments_all/gtotree_out_sediments_all_noBestHit/Aligned_SCGs.faa \
   -m MFP \
   -B 1000 \
   -T 24 \
-  --prefix phylo_sed_only/atrib_iqtree
+  --prefix Sediments_all/atrib_iqtree
 ```
 
 
