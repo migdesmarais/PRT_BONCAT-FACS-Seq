@@ -173,7 +173,7 @@ wc -l phylo_sed_only/genomes_filtered_sediment.no_allgap.list
 rm -rf phylo/gtotree_out_besthit_no_allgap_sediment
 
 GToTree \
-  -f phylo_sed_only/genomes_filtered_sediment.no_allgap.list \
+  -f phylo_sed_only/genomes_filtered_sediment.list \
   -H Bacteria \
   -B \
   -o phylo_sed_only/gtotree_out_besthit_no_allgap_sed \
