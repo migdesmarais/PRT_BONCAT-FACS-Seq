@@ -122,6 +122,77 @@ for R1 in "$READS_DIR"/*_paired_R1.fastq.gz; do
 done
 ```
 
+New, un derep:
+```
+set -euo pipefail
+
+BASE="/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ"
+RUN_TAG="q20"
+THREADS=16
+FASTQ_DIR="${BASE}/trimmed_reads_FINAL"
+IDX_PREFIX="${BASE}/MAGs/ALL_MAGs/all_MAGs_index"
+OUT_DIR="${BASE}/magmap_out_all_${RUN_TAG}"
+BAM_DIR="${OUT_DIR}/bam"
+LOG_DIR="${OUT_DIR}/logs"
+MAP_TSV="${OUT_DIR}/mapping_from_bowtie2.${RUN_TAG}.tsv"
+
+echo "[WHERE] host=$(hostname)  pwd=$(pwd)"
+echo "[CHECK] BASE exists?"; ls -ld "$BASE"
+echo "[CHECK] FASTQ_DIR exists?"; ls -ld "$FASTQ_DIR"
+echo "[CHECK] OUT_DIR will be: $OUT_DIR"
+
+# HARD CREATE + VERIFY (this is what you're missing)
+mkdir -p "$BAM_DIR" "$LOG_DIR"
+ls -ld "$OUT_DIR" "$BAM_DIR" "$LOG_DIR"
+
+# test write permission
+echo "test" > "$LOG_DIR/_write_test.txt"
+rm -f "$LOG_DIR/_write_test.txt"
+echo "[OK] can write to $LOG_DIR"
+
+# init summary
+echo -e "sample\ttotal_reads\tmapped_reads\toverall_alignment_rate" > "$MAP_TSV"
+
+# collect R1s
+shopt -s nullglob
+R1S=( "$FASTQ_DIR"/*_paired_R1.fastq.gz )
+echo "[INFO] n_R1=${#R1S[@]}"
+[[ ${#R1S[@]} -gt 0 ]] || { echo "[ERROR] No R1 fastqs found"; exit 1; }
+
+# map
+for r1 in "${R1S[@]}"; do
+  sample="$(basename "$r1" | sed 's/_paired_R1\.fastq\.gz$//')"
+  r2="$FASTQ_DIR/${sample}_paired_R2.fastq.gz"
+  [[ -s "$r2" ]] || { echo "[ERROR] Missing R2 for $sample"; continue; }
+
+  outbam="$BAM_DIR/${sample}.${RUN_TAG}.primary.bam"
+  outlog="$LOG_DIR/${sample}_bowtie2.${RUN_TAG}.log"
+
+  if [[ -s "$outbam" && -s "${outbam}.bai" ]]; then
+    echo "[SKIP] $sample"
+    continue
+  fi
+
+  echo "[MAP] $sample"
+  bowtie2 -x "$IDX_PREFIX" -1 "$r1" -2 "$r2" -p "$THREADS" 2> "$outlog" \
+    | samtools view -b -F 4 - \
+    | samtools sort -@ "$THREADS" -o "$outbam" -
+
+  samtools index "$outbam"
+
+  total="$(grep -m1 'reads; of these:' "$outlog" | awk '{print $1}' || true)"
+  rate="$(grep -m1 'overall alignment rate' "$outlog" | awk '{print $1}' || true)"
+  mapped="$(samtools flagstat "$outbam" | awk '/ mapped \(/ {print $1; exit}' || true)"
+
+  echo -e "${sample}\t${total:-NA}\t${mapped:-NA}\t${rate:-NA}" >> "$MAP_TSV"
+done
+
+echo "[DONE] BAMs: $(ls -1 "$BAM_DIR"/*.bam 2>/dev/null | wc -l)"
+echo "[DONE] Logs: $(ls -1 "$LOG_DIR"/*.log 2>/dev/null | wc -l)"
+echo "[DONE] Map summary: $MAP_TSV"
+```
+
+
 Summary of mapping rate (per sample).
 
 ```bash
@@ -179,6 +250,34 @@ done
 column -t -s$'\t' "$DEST" | less -S
 ```
 
+```bash
+OUT=/scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/magmap_out_all_q20
+DEST="$OUT/mapping_from_bowtie2.q20.tsv"
+
+echo -e "sample\ttotal_reads\tmapped_reads\toverall_alignment_rate" > "$DEST"
+
+shopt -s nullglob
+for f in "$OUT"/logs/*_bowtie2.q20.log; do
+  sample=$(basename "$f" _bowtie2.q20.log)
+
+  # total reads
+  total=$(awk '/ reads; of these:/{print $1; exit}' "$f")
+
+  # mapped reads (concordant pairs only, matches --no-mixed --no-discordant)
+  exact1=$(awk '/aligned concordantly exactly 1 time/{print $1; exit}' "$f")
+  gt1=$(awk '/aligned concordantly >1 times/{print $1; exit}' "$f")
+  mapped=$(( (${exact1:-0}) + (${gt1:-0}) ))
+
+  # overall alignment rate (keeps %)
+  rate=$(awk '/overall alignment rate/{print $1; exit}' "$f")
+
+  printf "%s\t%s\t%s\t%s\n" "$sample" "${total:-0}" "${mapped:-0}" "${rate:-0%}" >> "$DEST"
+done
+
+# pretty view
+column -t -s$'\t' "$DEST" | less -S
+```
+
 ## 4. Verify MD/NM Tags for CoverM
 
 CoverM requires NM (edit distance) and MD (mismatch string) tags in BAMs.
@@ -194,6 +293,8 @@ samtools view -h $OUT/bam/540AT2ALL.q30.primary.bam | grep -m1 -E "NM:i|MD:Z" ||
 
 Estimate MAG coverage, RPKM, and relative abundance from mapped reads.
 
+conda activate coverm_env
+
 Strict setting 95 75
 ```bash
 coverm genome \
@@ -204,6 +305,18 @@ coverm genome \
   --min-read-percent-identity 95 \
   --min-read-aligned-percent 75 \
   --output-file /scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/magmap_out/mag_coverage_summary_strict.tsv \
+  --threads 12
+```
+
+```bash
+coverm genome \
+  --bam-files /scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/magmap_out_all_q20/bam/*.bam \
+  --genome-fasta-directory /scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/MAGs/ALL_MAGs \
+  --genome-fasta-extension fa \
+  --methods covered_bases covered_fraction mean rpkm relative_abundance \
+  --min-read-percent-identity 95 \
+  --min-read-aligned-percent 75 \
+  --output-file /scratch/mdesmarais/PRT_BONCAT-FACS-SEQ/magmap_out_all_q20/mag_coverage_summary_strict.tsv \
   --threads 12
 ```
 
